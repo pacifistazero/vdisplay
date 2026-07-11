@@ -22,6 +22,7 @@ Three pieces, all from one small codebase:
 
 ```sh
 brew tap pacifistazero/tap
+brew trust pacifistazero/tap   # recent Homebrew requires trusting third-party taps
 brew install vdisplay
 ```
 

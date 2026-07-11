@@ -1,17 +1,38 @@
 # vdisplay
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Platform: macOS](https://img.shields.io/badge/platform-macOS-black.svg)
+
 Self-owned virtual displays for macOS via the private `CGVirtualDisplay`
 CoreGraphics API — the same mechanism BetterDisplay / BetterDummy / DeskPad use.
 Drive resolutions and aspect ratios (e.g. 16:9) your physical monitor doesn't
-natively offer. No license, no expiry, no paid tier.
+natively offer. Free, no expiry, no paid tier.
+
+![vdisplay CLI demo](docs/demo.gif)
 
 Three pieces, all from one small codebase:
 
 - **`vdisplay`** — command-line tool
-- **`vdisplaybar`** — menu-bar app (toggle displays, auto-start at login)
+- **`vdisplaybar`** — menu-bar app (toggle displays, auto-start at login, monitor layouts)
 - **saved profiles** — JSON at `~/.config/vdisplay/profiles.json`
 
-## Quick start (menu-bar app + auto-start at login)
+## Install
+
+### Homebrew (recommended)
+
+```sh
+brew tap pacifistazero/tap
+brew install vdisplay
+```
+
+Then run the menu-bar app and register it to launch at login:
+
+```sh
+vdisplaybar &            # try it now
+# auto-start at login is set up by the LaunchAgent installer below
+```
+
+### From source
 
 ```sh
 scripts/install-launchagent.sh
@@ -106,3 +127,7 @@ drops it to remove one.
 Because this is a private API, a macOS major update *could* change the
 signatures. If creation ever starts failing, the declarations in
 `Sources/CGVirtualDisplayShim/include/CGVirtualDisplayShim.h` are the place to fix.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

@@ -13,7 +13,7 @@ natively offer. Free, no expiry, no paid tier.
 Three pieces, all from one small codebase:
 
 - **`vdisplay`** — command-line tool
-- **`vdisplaybar`** — menu-bar app (toggle displays, auto-start at login, monitor layouts)
+- **`vdisplaybar`** — menu-bar app (toggle displays, auto-start at login, monitor layouts, brightness)
 - **saved profiles** — JSON at `~/.config/vdisplay/profiles.json`
 
 ## Install
@@ -65,6 +65,9 @@ vdisplay path                     # print profiles file location
 vdisplay layouts                  # list saved monitor arrangements
 vdisplay save-layout [name]       # snapshot current arrangement (default: "default")
 vdisplay restore-layout [name]    # re-apply a saved arrangement
+
+vdisplay brightness               # print physical monitor brightness
+vdisplay brightness 60            # set it to 60% (DDC, external monitor)
 vdisplay --help
 ```
 
@@ -103,6 +106,20 @@ Layouts are stored as readable `displayplacer` commands in
 (`brew install displayplacer`) as the capture/apply engine. Note that layouts key
 off per-display IDs, so a saved arrangement restores best with the same set of
 displays connected.
+
+## Monitor brightness
+
+Adjust the brightness of a **physical** external monitor over DDC/CI - handy
+because macOS's brightness keys don't drive most external displays.
+
+- Menu bar: the **Monitor Brightness** slider
+- CLI: `vdisplay brightness` (read) / `vdisplay brightness <0-100>` (set)
+
+This uses [`m1ddc`](https://github.com/waydabber/m1ddc) (`brew install m1ddc`) as
+the DDC engine, so it needs an **Apple Silicon** Mac and a DDC-capable monitor
+connected over USB-C / DisplayPort (the built-in HDMI port on M1 and entry-level
+M2 Macs is not supported). Virtual displays have no backlight, so this only
+affects real panels.
 
 ## Project layout
 

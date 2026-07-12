@@ -137,6 +137,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         layoutItem.submenu = layoutMenu
         menu.addItem(layoutItem)
 
+        // Physical-monitor brightness over DDC (only when m1ddc is installed).
+        if let brightness = brightnessMenuItem() {
+            menu.addItem(.separator())
+            menu.addItem(disabledItem("Monitor Brightness"))
+            menu.addItem(brightness)
+        }
+
+        menu.addItem(.separator())
+
         let edit = NSMenuItem(title: "Edit Profiles…",
                               action: #selector(editProfiles), keyEquivalent: "")
         edit.target = self
@@ -153,6 +162,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.isEnabled = false
         return item
+    }
+
+    /// A menu item hosting a slider for physical-monitor brightness, or nil if
+    /// the DDC engine (m1ddc) isn't installed.
+    private func brightnessMenuItem() -> NSMenuItem? {
+        guard BrightnessController.shared.isAvailable else { return nil }
+        let width: CGFloat = 220, height: CGFloat = 28
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+
+        let slider = NSSlider(value: Double(BrightnessController.shared.get() ?? 100),
+                              minValue: 0, maxValue: 100,
+                              target: self, action: #selector(brightnessChanged(_:)))
+        slider.frame = NSRect(x: 20, y: 4, width: width - 40, height: 20)
+        // DDC writes are slow; fire on release rather than on every drag tick.
+        slider.isContinuous = false
+        container.addSubview(slider)
+
+        let item = NSMenuItem()
+        item.view = container
+        return item
+    }
+
+    @objc private func brightnessChanged(_ sender: NSSlider) {
+        if let err = BrightnessController.shared.set(sender.integerValue) {
+            showError("Couldn’t set brightness", err)
+        }
     }
 
     @objc private func toggle(_ sender: NSMenuItem) {

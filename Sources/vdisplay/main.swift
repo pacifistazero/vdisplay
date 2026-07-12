@@ -28,6 +28,8 @@ func usage() {
       vdisplay restore-layout [name]  re-apply a saved arrangement
       vdisplay startup-layout [name|none]
                                  get/set the layout auto-restored at login
+
+      vdisplay brightness [0-100]     get/set physical monitor brightness (DDC)
       vdisplay --help
 
     Profiles live at ~/.config/vdisplay/profiles.json
@@ -99,6 +101,21 @@ case "check":
         manager.stop("check")
     } else {
         print("❌ FAIL  \(w)×\(h) hidpi=\(hidpi) (backing \(backing))")
+    }
+
+case "brightness":
+    let ctl = BrightnessController.shared
+    guard ctl.isAvailable else {
+        die("m1ddc not found — install it with: brew install m1ddc")
+    }
+    if args.count >= 2 {
+        guard let value = Int(args[1]) else { die("usage: vdisplay brightness [0-100]") }
+        if let err = ctl.set(value) { die(err) }
+        print("brightness set to \(max(0, min(100, value)))%")
+    } else if let current = ctl.get() {
+        print("\(current)%")
+    } else {
+        die("could not read brightness (is a DDC-capable monitor connected?)")
     }
 
 case "run":

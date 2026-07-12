@@ -5,6 +5,7 @@ import VirtualDisplayKit
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
+    private let mediaKeys = MediaKeyController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -26,6 +27,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Re-apply the chosen monitor layout once displays have settled at login.
         reapplyLayout(after: 4)
+
+        // Route brightness keys to the external monitor if enabled and permitted.
+        if SettingsStore.shared.load().brightnessKeys,
+           MediaKeyController.hasAccessibility(prompt: false) {
+            _ = mediaKeys.start()
+        }
     }
 
     /// Creating or destroying a virtual display makes WindowServer reshuffle the
@@ -142,6 +149,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(.separator())
             menu.addItem(disabledItem("Monitor Brightness"))
             menu.addItem(brightness)
+
+            let keys = NSMenuItem(title: "Use Brightness Keys (F1/F2)",
+                                  action: #selector(toggleBrightnessKeys(_:)), keyEquivalent: "")
+            keys.target = self
+            keys.state = mediaKeys.isRunning ? .on : .off
+            menu.addItem(keys)
         }
 
         menu.addItem(.separator())
@@ -187,6 +200,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func brightnessChanged(_ sender: NSSlider) {
         if let err = BrightnessController.shared.set(sender.integerValue) {
             showError("Couldn’t set brightness", err)
+        }
+    }
+
+    @objc private func toggleBrightnessKeys(_ sender: NSMenuItem) {
+        var settings = SettingsStore.shared.load()
+        if mediaKeys.isRunning {
+            mediaKeys.stop()
+            settings.brightnessKeys = false
+            SettingsStore.shared.save(settings)
+            return
+        }
+        // Enabling: needs Accessibility permission to install a swallowing tap.
+        guard MediaKeyController.hasAccessibility(prompt: true) else {
+            settings.brightnessKeys = true   // remember intent; starts once granted
+            SettingsStore.shared.save(settings)
+            promptForAccessibility()
+            return
+        }
+        if mediaKeys.start() {
+            settings.brightnessKeys = true
+        } else {
+            settings.brightnessKeys = false
+            promptForAccessibility()
+        }
+        SettingsStore.shared.save(settings)
+    }
+
+    private func promptForAccessibility() {
+        let a = NSAlert()
+        a.messageText = "Accessibility permission needed"
+        a.informativeText = """
+        To use the brightness keys on your external monitor, grant vdisplaybar \
+        access under System Settings › Privacy & Security › Accessibility, then \
+        enable this again.
+        """
+        a.addButton(withTitle: "Open Settings")
+        a.addButton(withTitle: "Later")
+        NSApp.activate(ignoringOtherApps: true)
+        if a.runModal() == .alertFirstButtonReturn,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
         }
     }
 

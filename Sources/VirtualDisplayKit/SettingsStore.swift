@@ -6,15 +6,20 @@ public struct Settings: Codable, Equatable {
     /// (i.e. at login). `nil` disables auto-restore.
     public var startupLayout: String?
 
-    public init(startupLayout: String? = nil) {
+    /// Route the keyboard brightness keys to the external monitor over DDC.
+    public var brightnessKeys: Bool
+
+    public init(startupLayout: String? = nil, brightnessKeys: Bool = false) {
         self.startupLayout = startupLayout
+        self.brightnessKeys = brightnessKeys
     }
 
-    private enum CodingKeys: String, CodingKey { case startupLayout }
+    private enum CodingKeys: String, CodingKey { case startupLayout, brightnessKeys }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         startupLayout = try c.decodeIfPresent(String.self, forKey: .startupLayout)
+        brightnessKeys = try c.decodeIfPresent(Bool.self, forKey: .brightnessKeys) ?? false
     }
 }
 

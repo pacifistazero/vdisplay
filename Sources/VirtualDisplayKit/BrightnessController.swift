@@ -33,6 +33,15 @@ public final class BrightnessController {
         return msg.isEmpty ? "m1ddc exited with code \(r.exitCode)" : msg
     }
 
+    /// Nudge brightness by `delta` (e.g. +10 / -10), clamped to 0-100.
+    /// Returns the new value on success, else nil.
+    @discardableResult
+    public func change(by delta: Int) -> Int? {
+        guard let current = get() else { return nil }
+        let next = max(0, min(100, current + delta))
+        return set(next) == nil ? next : nil
+    }
+
     // MARK: - helpers
 
     static func m1ddcPath() -> String? {

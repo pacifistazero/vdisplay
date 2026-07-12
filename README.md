@@ -114,6 +114,16 @@ because macOS's brightness keys don't drive most external displays.
 
 - Menu bar: the **Monitor Brightness** slider
 - CLI: `vdisplay brightness` (read) / `vdisplay brightness <0-100>` (set)
+- Keyboard: **Use Brightness Keys (F1/F2)** in the menu makes the physical
+  brightness keys drive the external monitor (with an on-screen indicator)
+
+macOS's brightness keys only ever control the built-in display, so vdisplaybar
+can intercept them and send DDC instead. That interception needs **Accessibility
+permission** (System Settings › Privacy & Security › Accessibility) - the app
+will prompt you the first time you enable it. While enabled, the keys adjust the
+external monitor rather than the laptop's own backlight. Note: because the
+LaunchAgent binary is unsigned, macOS may ask you to re-grant Accessibility after
+a reinstall.
 
 This uses [`m1ddc`](https://github.com/waydabber/m1ddc) (`brew install m1ddc`) as
 the DDC engine, so it needs an **Apple Silicon** Mac and a DDC-capable monitor

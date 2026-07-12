@@ -51,7 +51,7 @@ public extension DisplayProfile {
     /// Sensible starter set, written on first run.
     static let defaults: [DisplayProfile] = [
         DisplayProfile(name: "1080p 16:9", width: 1920, height: 1080),
-        DisplayProfile(name: "1440p 16:9", width: 2560, height: 1440),
+        DisplayProfile(name: "1440p (2K) 16:9", width: 2560, height: 1440),
         DisplayProfile(name: "4K 16:9", width: 3840, height: 2160),
         DisplayProfile(name: "Ultrawide 21:9", width: 3440, height: 1440),
     ]

@@ -24,12 +24,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             _ = DisplayManager.shared.start(profile)
         }
 
-        // Re-apply the chosen monitor layout once displays have settled.
-        if let layout = SettingsStore.shared.load().startupLayout, !layout.isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-                _ = LayoutStore.shared.restore(layout)
-            }
+        // Re-apply the chosen monitor layout once displays have settled at login.
+        reapplyLayout(after: 4)
+    }
+
+    /// Creating or destroying a virtual display makes WindowServer reshuffle the
+    /// physical monitor arrangement. If the user keeps a layout, re-apply it once
+    /// the displays settle so toggling a display doesn't scramble their setup.
+    private func reapplyLayout(after delay: TimeInterval = 2) {
+        guard let layout = layoutToReapply() else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            _ = LayoutStore.shared.restore(layout)
         }
+    }
+
+    /// The layout to snap back to: the explicit "Restore at Login" choice, or a
+    /// layout literally named "default" if one was saved.
+    private func layoutToReapply() -> String? {
+        if let configured = SettingsStore.shared.load().startupLayout, !configured.isEmpty {
+            return configured
+        }
+        return LayoutStore.shared.list().contains("default") ? "default" : nil
     }
 
     // Rebuild the menu each time it opens so state is always fresh.
@@ -145,10 +160,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let manager = DisplayManager.shared
         if manager.isActive(name) {
             manager.stop(name)
+            reapplyLayout()
         } else if let profile = ProfileStore.shared.loadOrCreate().first(where: { $0.name == name }) {
             if manager.start(profile) == nil {
                 showError("Failed to create “\(name)”.",
                           "The private display API may have changed on this macOS version.")
+            } else {
+                reapplyLayout()
             }
         }
     }
@@ -163,6 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func stopAll() {
         DisplayManager.shared.stopAll()
+        reapplyLayout()
     }
 
     @objc private func restoreLayout(_ sender: NSMenuItem) {

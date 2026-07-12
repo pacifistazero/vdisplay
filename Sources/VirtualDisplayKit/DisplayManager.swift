@@ -12,6 +12,9 @@ public final class DisplayManager {
 
     private let queue = DispatchQueue(label: "com.vdisplay.manager")
     private var active: [String: CGVirtualDisplay] = [:]
+    // WindowServer rejects a second display that shares another's EDID identity,
+    // so every display gets a unique serial number.
+    private var nextSerial: UInt32 = 0x0001
 
     public init() {}
 
@@ -31,7 +34,8 @@ public final class DisplayManager {
                                               height: Double(profile.height) * 0.254)
         descriptor.productID = 0x1234
         descriptor.vendorID = 0x1AB2
-        descriptor.serialNum = 0x0001
+        descriptor.serialNum = nextSerial
+        nextSerial += 1
         descriptor.terminationHandler = { _, _ in }
 
         let display = CGVirtualDisplay(descriptor: descriptor)

@@ -85,6 +85,22 @@ case "startup-layout":
         print(SettingsStore.shared.load().startupLayout ?? "none")
     }
 
+case "check":
+    // Non-blocking probe: try to create the display, report ok/fail, exit.
+    // usage: vdisplay check <W> <H> [--no-hidpi]
+    guard args.count >= 3, let w = UInt32(args[1]), let h = UInt32(args[2]) else {
+        die("usage: vdisplay check <W> <H> [--no-hidpi]")
+    }
+    let hidpi = !args.contains("--no-hidpi")
+    let backing = hidpi ? "\(w * 2)×\(h * 2)" : "\(w)×\(h)"
+    let profile = DisplayProfile(name: "check", width: w, height: h, hiDPI: hidpi)
+    if manager.start(profile) != nil {
+        print("✅ ok    \(w)×\(h) hidpi=\(hidpi) (backing \(backing))")
+        manager.stop("check")
+    } else {
+        print("❌ FAIL  \(w)×\(h) hidpi=\(hidpi) (backing \(backing))")
+    }
+
 case "run":
     guard args.count >= 2 else { die("run needs a profile name — try: vdisplay list") }
     guard let p = store.loadOrCreate().first(where: { $0.name == args[1] }) else {

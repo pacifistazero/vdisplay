@@ -118,12 +118,14 @@ because macOS's brightness keys don't drive most external displays.
   brightness keys drive the external monitor (with an on-screen indicator)
 
 macOS's brightness keys only ever control the built-in display, so vdisplaybar
-can intercept them and send DDC instead. That interception needs **Accessibility
-permission** (System Settings › Privacy & Security › Accessibility) - the app
-will prompt you the first time you enable it. While enabled, the keys adjust the
-external monitor rather than the laptop's own backlight. Note: because the
-LaunchAgent binary is unsigned, macOS may ask you to re-grant Accessibility after
-a reinstall.
+can intercept them and send DDC instead. On Apple Silicon the brightness keys
+arrive as ordinary key events (keycode 144 = up / F2, 145 = down / F1), so
+vdisplaybar taps them at the HID level, sends DDC, and swallows the event so the
+built-in panel's brightness doesn't also move. This needs **Accessibility
+permission** (System Settings › Privacy & Security › Accessibility) - macOS
+prompts you the first time you enable it. The installer ad-hoc code-signs
+`vdisplaybar` with a stable identity so the grant survives reinstalls; a rebuild
+may occasionally still ask you to re-grant.
 
 This uses [`m1ddc`](https://github.com/waydabber/m1ddc) (`brew install m1ddc`) as
 the DDC engine, so it needs an **Apple Silicon** Mac and a DDC-capable monitor

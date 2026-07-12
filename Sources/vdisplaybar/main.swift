@@ -208,40 +208,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if mediaKeys.isRunning {
             mediaKeys.stop()
             settings.brightnessKeys = false
-            SettingsStore.shared.save(settings)
-            return
-        }
-        // Enabling: needs Accessibility permission to install a swallowing tap.
-        guard MediaKeyController.hasAccessibility(prompt: true) else {
-            settings.brightnessKeys = true   // remember intent; starts once granted
-            SettingsStore.shared.save(settings)
-            promptForAccessibility()
-            return
-        }
-        if mediaKeys.start() {
-            settings.brightnessKeys = true
+        } else if MediaKeyController.hasAccessibility(prompt: true) {
+            // macOS shows its own permission dialog when not yet trusted.
+            settings.brightnessKeys = mediaKeys.start()
         } else {
-            settings.brightnessKeys = false
-            promptForAccessibility()
+            // Not trusted yet; remember intent so it starts once granted.
+            settings.brightnessKeys = true
         }
         SettingsStore.shared.save(settings)
-    }
-
-    private func promptForAccessibility() {
-        let a = NSAlert()
-        a.messageText = "Accessibility permission needed"
-        a.informativeText = """
-        To use the brightness keys on your external monitor, grant vdisplaybar \
-        access under System Settings › Privacy & Security › Accessibility, then \
-        enable this again.
-        """
-        a.addButton(withTitle: "Open Settings")
-        a.addButton(withTitle: "Later")
-        NSApp.activate(ignoringOtherApps: true)
-        if a.runModal() == .alertFirstButtonReturn,
-           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
     }
 
     @objc private func toggle(_ sender: NSMenuItem) {

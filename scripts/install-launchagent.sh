@@ -17,6 +17,12 @@ mkdir -p "$BIN_DIR"
 cp "$BUILD/vdisplay" "$BIN_DIR/vdisplay"
 cp "$BUILD/vdisplaybar" "$BIN_DIR/vdisplaybar"
 
+# Ad-hoc code-sign so macOS gives vdisplaybar a stable code identity - required
+# for Accessibility (the brightness-key interception) to be granted reliably.
+echo "▸ Code-signing vdisplaybar (ad-hoc, stable identifier)"
+codesign --force --sign - --identifier "$LABEL" "$BIN_DIR/vdisplaybar" 2>/dev/null || \
+  echo "  (codesign unavailable - brightness keys may need re-granting)"
+
 echo "▸ Writing LaunchAgent $PLIST"
 mkdir -p "$(dirname "$PLIST")"
 cat > "$PLIST" <<EOF

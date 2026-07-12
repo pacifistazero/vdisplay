@@ -10,11 +10,18 @@ natively offer. Free, no expiry, no paid tier.
 
 ![vdisplay CLI demo](docs/demo.gif)
 
-Three pieces, all from one small codebase:
+## Features
 
-- **`vdisplay`** — command-line tool
-- **`vdisplaybar`** — menu-bar app (toggle displays, auto-start at login, monitor layouts, brightness)
-- **saved profiles** — JSON at `~/.config/vdisplay/profiles.json`
+- **Virtual displays** — HiDPI/retina 16:9, 21:9, or any custom resolution your
+  panel can't do natively; run several at once.
+- **Saved profiles** — named configs (1080p, 1440p/2K, 4K, ultrawide) you toggle
+  on/off, with auto-start at login.
+- **Monitor layouts** — snapshot and restore full multi-display arrangements;
+  auto-reapplied after toggling a display so your setup never gets scrambled.
+- **Monitor brightness** — control a physical external monitor over DDC with a
+  menu-bar slider, a CLI, or by routing the **F1/F2 brightness keys** to it.
+- **Two front-ends** — a `vdisplay` CLI and a `vdisplaybar` menu-bar app, from
+  one small codebase.
 
 ## Install
 

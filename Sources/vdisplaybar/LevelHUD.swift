@@ -1,15 +1,17 @@
 import Cocoa
 
-/// A small on-screen brightness indicator, shown when the brightness keys are
-/// intercepted (we swallow the system's own HUD, so we provide a replacement).
-final class BrightnessHUD {
+/// A small on-screen level indicator, shown when the brightness or volume keys
+/// are intercepted (we swallow the system's own HUD, so we provide a replacement).
+final class LevelHUD {
     private var window: NSWindow?
     private let bar = NSProgressIndicator()
+    private let icon = NSImageView()
     private var hideWork: DispatchWorkItem?
 
-    func show(level: Int) {
+    func show(level: Int, symbol: String) {
         let window = ensureWindow()
         bar.doubleValue = Double(level)
+        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
 
         if let screen = NSScreen.main {
             let size = window.frame.size
@@ -50,9 +52,7 @@ final class BrightnessHUD {
         blur.layer?.cornerRadius = 16
         blur.layer?.masksToBounds = true
 
-        let icon = NSImageView(frame: NSRect(x: w / 2 - 13, y: h - 34, width: 26, height: 24))
-        icon.image = NSImage(systemSymbolName: "sun.max.fill",
-                             accessibilityDescription: "Brightness")
+        icon.frame = NSRect(x: w / 2 - 13, y: h - 34, width: 26, height: 24)
         icon.contentTintColor = .white
         icon.imageScaling = .scaleProportionallyUpOrDown
         blur.addSubview(icon)

@@ -1,39 +1,49 @@
 import Foundation
 
-/// Controls the brightness of a physical external monitor over DDC/CI using
-/// `m1ddc` as the engine. Virtual displays have no backlight, so this only
-/// affects real DDC-capable panels connected to an Apple Silicon Mac.
-public final class BrightnessController {
-    public static let shared = BrightnessController()
+/// Controls a DDC/CI feature of a physical external monitor using `m1ddc` as the
+/// engine. Virtual displays have no backlight or speakers, so this only affects
+/// real DDC-capable panels connected to an Apple Silicon Mac.
+public final class DDCControl {
+    /// Backlight brightness.
+    public static let brightness = DDCControl(feature: "luminance", label: "brightness")
+    /// Monitor speaker volume (the panel's own speakers, e.g. over HDMI/DP).
+    public static let volume = DDCControl(feature: "volume", label: "volume")
 
-    public init() {}
+    /// The m1ddc feature name, e.g. "luminance" or "volume".
+    public let feature: String
+    /// Human-readable name used in error messages.
+    public let label: String
+
+    public init(feature: String, label: String) {
+        self.feature = feature
+        self.label = label
+    }
 
     /// True when the `m1ddc` engine is installed.
     public var isAvailable: Bool { Self.m1ddcPath() != nil }
 
-    /// Current luminance (0-100), or nil if it can't be read.
+    /// Current value (0-100), or nil if it can't be read.
     public func get() -> Int? {
         guard let m1ddc = Self.m1ddcPath() else { return nil }
-        let r = Self.run(m1ddc, ["get", "luminance"])
+        let r = Self.run(m1ddc, ["get", feature])
         guard r.exitCode == 0 else { return nil }
         return Int(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    /// Set luminance to `value` (clamped to 0-100). Returns nil on success,
-    /// else an error message.
+    /// Set the value (clamped to 0-100). Returns nil on success, else an error message.
     @discardableResult
     public func set(_ value: Int) -> String? {
         guard let m1ddc = Self.m1ddcPath() else {
             return "m1ddc not found — install it with: brew install m1ddc"
         }
         let clamped = max(0, min(100, value))
-        let r = Self.run(m1ddc, ["set", "luminance", String(clamped)])
+        let r = Self.run(m1ddc, ["set", feature, String(clamped)])
         if r.exitCode == 0 { return nil }
         let msg = r.stderr.isEmpty ? r.stdout : r.stderr
         return msg.isEmpty ? "m1ddc exited with code \(r.exitCode)" : msg
     }
 
-    /// Nudge brightness by `delta` (e.g. +10 / -10), clamped to 0-100.
+    /// Nudge the value by `delta` (e.g. +10 / -10), clamped to 0-100.
     /// Returns the new value on success, else nil.
     @discardableResult
     public func change(by delta: Int) -> Int? {

@@ -28,11 +28,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Re-apply the chosen monitor layout once displays have settled at login.
         reapplyLayout(after: 4)
 
-        // Route brightness keys to the external monitor if enabled and permitted.
-        if SettingsStore.shared.load().brightnessKeys,
-           MediaKeyController.hasAccessibility(prompt: false) {
-            _ = mediaKeys.start()
-        }
+        // Route brightness / volume keys to the external monitor if enabled and permitted.
+        resumeKeyRouting()
+
+        // Routing only sticks while a monitor answers on DDC, so re-try whenever the
+        // display set changes - otherwise docking after launch leaves the keys off.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(screensChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
+    }
+
+    @objc private func screensChanged() {
+        // Give the monitor a moment to come up before asking it anything over DDC.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.resumeKeyRouting() }
+    }
+
+    /// Bring key routing in line with the saved preference, quietly - this also runs
+    /// on every display change, so a monitor that can't answer just stays unrouted.
+    private func resumeKeyRouting() {
+        let settings = SettingsStore.shared.load()
+        guard settings.brightnessKeys != mediaKeys.routesBrightness
+                || settings.volumeKeys != mediaKeys.routesVolume else { return }
+        guard settings.brightnessKeys || settings.volumeKeys,
+              MediaKeyController.hasAccessibility(prompt: false) else { return }
+        _ = mediaKeys.update(brightness: settings.brightnessKeys, volume: settings.volumeKeys)
     }
 
     /// Creating or destroying a virtual display makes WindowServer reshuffle the
@@ -144,17 +163,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         layoutItem.submenu = layoutMenu
         menu.addItem(layoutItem)
 
-        // Physical-monitor brightness over DDC (only when m1ddc is installed).
-        if let brightness = brightnessMenuItem() {
+        // Physical-monitor brightness over DDC (only when m1ddc is installed). The
+        // slider needs a monitor that answers; the keys toggle is always shown so
+        // there is something to click once one is connected.
+        // ponytail: each section costs one synchronous m1ddc read per menu open;
+        // cache + refresh in the background if the menu ever feels sluggish.
+        if DDCControl.brightness.isAvailable {
             menu.addItem(.separator())
             menu.addItem(disabledItem("Monitor Brightness"))
-            menu.addItem(brightness)
+            if let brightness = sliderItem(for: .brightness, action: #selector(brightnessChanged(_:))) {
+                menu.addItem(brightness)
+            }
 
-            let keys = NSMenuItem(title: "Use Brightness Keys (F1/F2)",
-                                  action: #selector(toggleBrightnessKeys(_:)), keyEquivalent: "")
-            keys.target = self
-            keys.state = mediaKeys.isRunning ? .on : .off
-            menu.addItem(keys)
+            menu.addItem(keysItem("Use Brightness Keys (F1/F2)",
+                                  on: mediaKeys.routesBrightness,
+                                  action: #selector(toggleBrightnessKeys)))
+        }
+
+        // Monitor speaker volume over DDC - macOS can't drive it when the panel's
+        // own speakers are the output (HDMI/DP digital out has no software volume).
+        if DDCControl.volume.isAvailable {
+            menu.addItem(.separator())
+            menu.addItem(disabledItem("Monitor Volume"))
+            if let volume = sliderItem(for: .volume, action: #selector(volumeChanged(_:))) {
+                menu.addItem(volume)
+            }
+            menu.addItem(keysItem("Use Volume Keys (F10-F12)",
+                                  on: mediaKeys.routesVolume,
+                                  action: #selector(toggleVolumeKeys)))
         }
 
         menu.addItem(.separator())
@@ -177,16 +213,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
-    /// A menu item hosting a slider for physical-monitor brightness, or nil if
-    /// the DDC engine (m1ddc) isn't installed.
-    private func brightnessMenuItem() -> NSMenuItem? {
-        guard BrightnessController.shared.isAvailable else { return nil }
+    /// A menu item hosting a slider for a DDC feature, or nil if the engine
+    /// (m1ddc) isn't installed or the monitor doesn't report that feature
+    /// (e.g. volume on a panel with no speakers).
+    private func sliderItem(for control: DDCControl, action: Selector) -> NSMenuItem? {
+        guard control.isAvailable, let current = control.get() else { return nil }
         let width: CGFloat = 220, height: CGFloat = 28
         let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
 
-        let slider = NSSlider(value: Double(BrightnessController.shared.get() ?? 100),
-                              minValue: 0, maxValue: 100,
-                              target: self, action: #selector(brightnessChanged(_:)))
+        let slider = NSSlider(value: Double(current), minValue: 0, maxValue: 100,
+                              target: self, action: action)
         slider.frame = NSRect(x: 20, y: 4, width: width - 40, height: 20)
         // DDC writes are slow; fire on release rather than on every drag tick.
         slider.isContinuous = false
@@ -198,22 +234,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func brightnessChanged(_ sender: NSSlider) {
-        if let err = BrightnessController.shared.set(sender.integerValue) {
-            showError("Couldn’t set brightness", err)
+        apply(.brightness, sender.integerValue)
+    }
+
+    @objc private func volumeChanged(_ sender: NSSlider) {
+        apply(.volume, sender.integerValue)
+    }
+
+    private func apply(_ control: DDCControl, _ value: Int) {
+        if let err = control.set(value) {
+            showError("Couldn’t set \(control.label)", err)
         }
     }
 
-    @objc private func toggleBrightnessKeys(_ sender: NSMenuItem) {
+    private func keysItem(_ title: String, on: Bool, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.state = on ? .on : .off
+        return item
+    }
+
+    @objc private func toggleBrightnessKeys() {
         var settings = SettingsStore.shared.load()
-        if mediaKeys.isRunning {
-            mediaKeys.stop()
-            settings.brightnessKeys = false
-        } else if MediaKeyController.hasAccessibility(prompt: true) {
-            // macOS shows its own permission dialog when not yet trusted.
-            settings.brightnessKeys = mediaKeys.start()
-        } else {
-            // Not trusted yet; remember intent so it starts once granted.
-            settings.brightnessKeys = true
+        settings.brightnessKeys = !mediaKeys.routesBrightness
+        applyKeyRouting(settings)
+    }
+
+    @objc private func toggleVolumeKeys() {
+        var settings = SettingsStore.shared.load()
+        settings.volumeKeys = !mediaKeys.routesVolume
+        applyKeyRouting(settings)
+    }
+
+    /// Start/stop the key tap to match `settings`, then persist. When macOS hasn't
+    /// granted Accessibility yet it shows its own dialog; we keep the intent so the
+    /// routing starts by itself on the next launch once granted.
+    private func applyKeyRouting(_ settings: Settings) {
+        let wanted = settings.brightnessKeys || settings.volumeKeys
+        if !wanted || MediaKeyController.hasAccessibility(prompt: true) {
+            if let err = mediaKeys.update(brightness: settings.brightnessKeys,
+                                          volume: settings.volumeKeys) {
+                showError("Couldn’t route the keys", err)
+            }
         }
         SettingsStore.shared.save(settings)
     }

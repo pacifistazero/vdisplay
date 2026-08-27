@@ -9,17 +9,24 @@ public struct Settings: Codable, Equatable {
     /// Route the keyboard brightness keys to the external monitor over DDC.
     public var brightnessKeys: Bool
 
-    public init(startupLayout: String? = nil, brightnessKeys: Bool = false) {
+    /// Route the keyboard volume keys to the external monitor's speakers over DDC.
+    public var volumeKeys: Bool
+
+    public init(startupLayout: String? = nil,
+                brightnessKeys: Bool = false,
+                volumeKeys: Bool = false) {
         self.startupLayout = startupLayout
         self.brightnessKeys = brightnessKeys
+        self.volumeKeys = volumeKeys
     }
 
-    private enum CodingKeys: String, CodingKey { case startupLayout, brightnessKeys }
+    private enum CodingKeys: String, CodingKey { case startupLayout, brightnessKeys, volumeKeys }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         startupLayout = try c.decodeIfPresent(String.self, forKey: .startupLayout)
         brightnessKeys = try c.decodeIfPresent(Bool.self, forKey: .brightnessKeys) ?? false
+        volumeKeys = try c.decodeIfPresent(Bool.self, forKey: .volumeKeys) ?? false
     }
 }
 

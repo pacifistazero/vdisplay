@@ -20,6 +20,8 @@ natively offer. Free, no expiry, no paid tier.
   auto-reapplied after toggling a display so your setup never gets scrambled.
 - **Monitor brightness** — control a physical external monitor over DDC with a
   menu-bar slider, a CLI, or by routing the **F1/F2 brightness keys** to it.
+- **Monitor volume** — drive the monitor's own speakers over DDC from a menu-bar
+  slider, a CLI, or by routing the **volume keys** (including mute) to them.
 - **Two front-ends** — a `vdisplay` CLI and a `vdisplaybar` menu-bar app, from
   one small codebase.
 
@@ -75,6 +77,8 @@ vdisplay restore-layout [name]    # re-apply a saved arrangement
 
 vdisplay brightness               # print physical monitor brightness
 vdisplay brightness 60            # set it to 60% (DDC, external monitor)
+vdisplay volume                   # print monitor speaker volume
+vdisplay volume 40                # set it to 40% (DDC, external monitor)
 vdisplay --help
 ```
 
@@ -134,11 +138,35 @@ prompts you the first time you enable it. The installer ad-hoc code-signs
 `vdisplaybar` with a stable identity so the grant survives reinstalls; a rebuild
 may occasionally still ask you to re-grant.
 
+## Monitor volume
+
+Same DDC channel, different feature: adjust the volume of the **monitor's own
+speakers** (the ones fed by HDMI/DisplayPort audio). macOS often exposes no
+volume control at all for a digital audio output, so the keyboard volume keys
+and the menu-bar slider do nothing - DDC talks to the monitor directly instead.
+
+- Menu bar: the **Monitor Volume** slider (hidden if the monitor reports no
+  volume feature, e.g. a panel without speakers)
+- CLI: `vdisplay volume` (read) / `vdisplay volume <0-100>` (set)
+- Keyboard: **Use Volume Keys (F10-F12)** in the menu sends the volume and mute
+  keys to the monitor instead
+
+Volume keys arrive as a different kind of event from the brightness keys -
+`NSSystemDefined` subtype 8 (key code 0 = up, 1 = down, 7 = mute) rather than
+plain key presses - but they are tapped the same way and need the same
+**Accessibility permission**. DDC has no "read mute", so mute is volume 0 with
+the previous level remembered and restored.
+
+Either key routing only engages while the monitor actually answers on DDC: if
+nothing responds the toggle refuses to switch on, and if a write fails later
+(monitor unplugged or asleep) the keys are handed straight back to macOS. The
+saved preference stays, so routing resumes at the next launch.
+
 This uses [`m1ddc`](https://github.com/waydabber/m1ddc) (`brew install m1ddc`) as
 the DDC engine, so it needs an **Apple Silicon** Mac and a DDC-capable monitor
 connected over USB-C / DisplayPort (the built-in HDMI port on M1 and entry-level
-M2 Macs is not supported). Virtual displays have no backlight, so this only
-affects real panels.
+M2 Macs is not supported). Virtual displays have no backlight or speakers, so
+both features only affect real panels.
 
 ## Project layout
 

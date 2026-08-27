@@ -30,6 +30,7 @@ func usage() {
                                  get/set the layout auto-restored at login
 
       vdisplay brightness [0-100]     get/set physical monitor brightness (DDC)
+      vdisplay volume [0-100]         get/set physical monitor speaker volume (DDC)
       vdisplay --help
 
     Profiles live at ~/.config/vdisplay/profiles.json
@@ -103,19 +104,19 @@ case "check":
         print("❌ FAIL  \(w)×\(h) hidpi=\(hidpi) (backing \(backing))")
     }
 
-case "brightness":
-    let ctl = BrightnessController.shared
+case "brightness", "volume":
+    let ctl = command == "volume" ? DDCControl.volume : DDCControl.brightness
     guard ctl.isAvailable else {
         die("m1ddc not found — install it with: brew install m1ddc")
     }
     if args.count >= 2 {
-        guard let value = Int(args[1]) else { die("usage: vdisplay brightness [0-100]") }
+        guard let value = Int(args[1]) else { die("usage: vdisplay \(command) [0-100]") }
         if let err = ctl.set(value) { die(err) }
-        print("brightness set to \(max(0, min(100, value)))%")
+        print("\(ctl.label) set to \(max(0, min(100, value)))%")
     } else if let current = ctl.get() {
         print("\(current)%")
     } else {
-        die("could not read brightness (is a DDC-capable monitor connected?)")
+        die("could not read \(ctl.label) (is a DDC-capable monitor connected?)")
     }
 
 case "run":

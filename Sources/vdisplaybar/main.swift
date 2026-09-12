@@ -60,7 +60,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func reapplyLayout(after delay: TimeInterval = 2) {
         guard let layout = layoutToReapply() else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            _ = LayoutStore.shared.restore(layout)
+            // No alert - this fires at login and after every display toggle. Log it, so a
+            // layout that can no longer be applied is visible instead of silently skipped.
+            if let err = LayoutStore.shared.restore(layout) {
+                FileHandle.standardError.write(
+                    "vdisplaybar: could not restore layout “\(layout)”: \(err)\n".data(using: .utf8)!)
+            }
         }
     }
 
@@ -160,6 +165,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                     action: #selector(saveLayoutPrompt), keyEquivalent: "")
         saveLayout.target = self
         layoutMenu.addItem(saveLayout)
+
+        if !saved.isEmpty {
+            let deleteItem = NSMenuItem(title: "Delete Layout", action: nil, keyEquivalent: "")
+            let deleteMenu = NSMenu()
+            for name in saved {
+                let item = NSMenuItem(title: "\(name)…",
+                                      action: #selector(deleteLayout(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = name
+                deleteMenu.addItem(item)
+            }
+            deleteItem.submenu = deleteMenu
+            layoutMenu.addItem(deleteItem)
+        }
         layoutItem.submenu = layoutMenu
         menu.addItem(layoutItem)
 
@@ -314,6 +333,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let err = LayoutStore.shared.restore(name) {
             showError("Couldn’t restore “\(name)”", err)
         }
+    }
+
+    @objc private func deleteLayout(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        let prompt = NSAlert()
+        prompt.messageText = "Delete layout “\(name)”?"
+        prompt.informativeText = "The saved arrangement is removed. Your displays stay as they are."
+        prompt.addButton(withTitle: "Delete")
+        prompt.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard prompt.runModal() == .alertFirstButtonReturn else { return }
+        LayoutStore.shared.delete(name)
     }
 
     @objc private func setStartupLayout(_ sender: NSMenuItem) {

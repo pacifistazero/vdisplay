@@ -12,9 +12,6 @@ public final class DisplayManager {
 
     private let queue = DispatchQueue(label: "com.vdisplay.manager")
     private var active: [String: CGVirtualDisplay] = [:]
-    // WindowServer rejects a second display that shares another's EDID identity,
-    // so every display gets a unique serial number.
-    private var nextSerial: UInt32 = 0x0001
 
     public init() {}
 
@@ -34,8 +31,7 @@ public final class DisplayManager {
                                               height: Double(profile.height) * 0.254)
         descriptor.productID = 0x1234
         descriptor.vendorID = 0x1AB2
-        descriptor.serialNum = nextSerial
-        nextSerial += 1
+        descriptor.serialNum = Self.serial(for: profile.name)
         descriptor.terminationHandler = { _, _ in }
 
         let display = CGVirtualDisplay(descriptor: descriptor)
@@ -76,5 +72,20 @@ public final class DisplayManager {
 
     public var activeNames: [String] {
         Array(active.keys)
+    }
+
+    /// A serial number derived from the profile name, so the same profile always
+    /// presents the same EDID identity. macOS derives a display's persistent UUID
+    /// from that identity, and saved monitor layouts key off the UUID - a counter
+    /// here would hand the display a new UUID on every launch and break restore.
+    /// WindowServer still rejects two live displays sharing an identity, which
+    /// distinct names keep apart (FNV-1a, so collisions need ~4 billion names).
+    static func serial(for name: String) -> UInt32 {
+        var hash: UInt32 = 0x811c_9dc5
+        for byte in name.utf8 {
+            hash ^= UInt32(byte)
+            hash = hash &* 0x0100_0193
+        }
+        return hash
     }
 }

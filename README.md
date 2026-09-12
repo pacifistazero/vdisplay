@@ -74,6 +74,7 @@ vdisplay path                     # print profiles file location
 vdisplay layouts                  # list saved monitor arrangements
 vdisplay save-layout [name]       # snapshot current arrangement (default: "default")
 vdisplay restore-layout [name]    # re-apply a saved arrangement
+vdisplay delete-layout <name>     # delete a saved arrangement
 
 vdisplay brightness               # print physical monitor brightness
 vdisplay brightness 60            # set it to 60% (DDC, external monitor)
@@ -109,14 +110,22 @@ Save and restore full monitor arrangements (resolution, position, rotation,
 primary display) by name — handy since plugging/unplugging displays or toggling
 virtual ones can reshuffle your layout.
 
-- Menu bar: **Monitor Layout ▸ Save Current Layout…** / **Restore "<name>"**
-- CLI: `vdisplay save-layout [name]` / `vdisplay restore-layout [name]` / `vdisplay layouts`
+- Menu bar: **Monitor Layout ▸ Save Current Layout…** / **Restore "<name>"** /
+  **Delete Layout ▸ "<name>"…**
+- CLI: `vdisplay save-layout [name]` / `vdisplay restore-layout [name]` /
+  `vdisplay delete-layout <name>` / `vdisplay layouts`
 
 Layouts are stored as readable `displayplacer` commands in
 `~/.config/vdisplay/layouts/`. This feature requires **displayplacer**
-(`brew install displayplacer`) as the capture/apply engine. Note that layouts key
-off per-display IDs, so a saved arrangement restores best with the same set of
+(`brew install displayplacer`) as the capture/apply engine. Layouts key off
+per-display IDs, so a saved arrangement restores best with the same set of
 displays connected.
+
+macOS derives those IDs from a display's EDID identity, so a virtual display gets
+its serial number from its profile name and keeps the same ID for good. Layouts
+saved before that (by a build where the serial came from a per-launch counter)
+name a virtual display that can never come back - `restore` says so, and
+re-saving the layout once fixes it.
 
 ## Monitor brightness
 

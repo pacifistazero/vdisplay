@@ -66,12 +66,30 @@ public final class LayoutStore {
         guard !args.isEmpty else { return "saved layout “\(name)” is empty" }
         let result = Self.run(placer, args)
         if result.exitCode == 0 { return nil }
-        let msg = result.stderr.isEmpty ? result.stdout : result.stderr
-        return msg.isEmpty ? "displayplacer exited with code \(result.exitCode)" : msg
+        var msg = result.stderr.isEmpty ? result.stdout : result.stderr
+        if msg.isEmpty { msg = "displayplacer exited with code \(result.exitCode)" }
+        if msg.contains("Unable to find screen") {
+            // The layout names a display that isn't here: a monitor is unplugged, or it
+            // was saved by a build that gave virtual displays a new identity per launch.
+            msg += "\nThat display isn't connected. If it is a virtual display saved by "
+                 + "an older build, save the layout again - virtual displays now keep a "
+                 + "stable identity."
+        }
+        return msg
     }
 
-    public func delete(_ name: String) {
+    /// Delete a saved layout. Returns false if there was no such layout.
+    @discardableResult
+    public func delete(_ name: String) -> Bool {
+        guard FileManager.default.fileExists(atPath: fileURL(name).path) else { return false }
         try? FileManager.default.removeItem(at: fileURL(name))
+        // Drop it as the login layout too, or startup would silently restore nothing.
+        var settings = SettingsStore.shared.load()
+        if settings.startupLayout == name {
+            settings.startupLayout = nil
+            SettingsStore.shared.save(settings)
+        }
+        return true
     }
 
     // MARK: - helpers

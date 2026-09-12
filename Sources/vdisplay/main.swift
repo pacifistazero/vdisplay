@@ -26,6 +26,7 @@ func usage() {
       vdisplay layouts           list saved monitor arrangements
       vdisplay save-layout [name]     snapshot the current arrangement (default: "default")
       vdisplay restore-layout [name]  re-apply a saved arrangement
+      vdisplay delete-layout <name>    delete a saved arrangement
       vdisplay startup-layout [name|none]
                                  get/set the layout auto-restored at login
 
@@ -77,6 +78,11 @@ case "restore-layout":
     let name = args.count >= 2 ? args[1] : "default"
     if let err = LayoutStore.shared.restore(name) { die(err) }
     print("✅ restored arrangement “\(name)”")
+
+case "delete-layout":
+    guard args.count >= 2 else { die("usage: vdisplay delete-layout <name>") }
+    guard LayoutStore.shared.delete(args[1]) else { die("no saved layout named “\(args[1])”") }
+    print("deleted layout “\(args[1])”")
 
 case "startup-layout":
     if args.count >= 2 {

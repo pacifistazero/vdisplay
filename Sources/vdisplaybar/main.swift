@@ -49,9 +49,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let settings = SettingsStore.shared.load()
         guard settings.brightnessKeys != mediaKeys.routesBrightness
                 || settings.volumeKeys != mediaKeys.routesVolume else { return }
-        guard settings.brightnessKeys || settings.volumeKeys,
-              MediaKeyController.hasAccessibility(prompt: false) else { return }
-        _ = mediaKeys.update(brightness: settings.brightnessKeys, volume: settings.volumeKeys)
+        guard settings.brightnessKeys || settings.volumeKeys else { return }
+        guard MediaKeyController.hasAccessibility(prompt: false) else {
+            log("key routing wanted but Accessibility is not granted to this binary")
+            return
+        }
+        if let err = mediaKeys.update(brightness: settings.brightnessKeys,
+                                      volume: settings.volumeKeys) {
+            log("key routing did not start: \(err)")
+        } else {
+            log("key routing on - brightness: \(mediaKeys.routesBrightness), "
+              + "volume: \(mediaKeys.routesVolume)")
+        }
+    }
+
+    /// Goes to /tmp/vdisplaybar.log via the LaunchAgent, the only place a background
+    /// menu-bar app can say something without interrupting the user.
+    private func log(_ message: String) {
+        FileHandle.standardError.write("vdisplaybar: \(message)\n".data(using: .utf8)!)
     }
 
     /// Creating or destroying a virtual display makes WindowServer reshuffle the
@@ -63,8 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // No alert - this fires at login and after every display toggle. Log it, so a
             // layout that can no longer be applied is visible instead of silently skipped.
             if let err = LayoutStore.shared.restore(layout) {
-                FileHandle.standardError.write(
-                    "vdisplaybar: could not restore layout “\(layout)”: \(err)\n".data(using: .utf8)!)
+                self.log("could not restore layout “\(layout)”: \(err)")
             }
         }
     }

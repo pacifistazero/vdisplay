@@ -13,14 +13,19 @@ final class LevelHUD {
         bar.doubleValue = Double(level)
         icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
 
-        if let screen = NSScreen.main {
-            let size = window.frame.size
-            let x = screen.frame.midX - size.width / 2
-            let y = screen.frame.minY + screen.frame.height * 0.12
-            window.setFrameOrigin(NSPoint(x: x, y: y))
+        // Holding a key calls this on every auto-repeat. Re-positioning and re-ordering
+        // the window that often is visible as stutter, so only do it on the way in - a
+        // repeat just moves the bar in a window that is already up.
+        if !window.isVisible || window.alphaValue < 1 {
+            if let screen = NSScreen.main {
+                let size = window.frame.size
+                let x = screen.frame.midX - size.width / 2
+                let y = screen.frame.minY + screen.frame.height * 0.12
+                window.setFrameOrigin(NSPoint(x: x, y: y))
+            }
+            window.alphaValue = 1
+            window.orderFrontRegardless()
         }
-        window.alphaValue = 1
-        window.orderFrontRegardless()
 
         hideWork?.cancel()
         let work = DispatchWorkItem { [weak window] in

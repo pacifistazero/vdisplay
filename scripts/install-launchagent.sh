@@ -54,5 +54,8 @@ launchctl bootstrap "gui/$(id -u)" "$PLIST"
 launchctl kickstart -k "gui/$(id -u)/$LABEL"
 
 echo "✅ Installed. The menu-bar app is running now and will start at every login."
+echo "⚠️  Rebuilding changes the ad-hoc signature, so macOS drops the Accessibility"
+echo "   grant that the brightness/volume keys need. If it asks, grant it; if the old"
+echo "   entry is still listed and ticked, remove it and re-add $BIN_DIR/vdisplaybar."
 echo "   Look for the display icon in your menu bar."
 echo "   Uninstall with: scripts/uninstall-launchagent.sh"

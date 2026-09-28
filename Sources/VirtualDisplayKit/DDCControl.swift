@@ -19,6 +19,11 @@ public final class DDCControl {
         self.label = label
     }
 
+    // One queue for all features: the monitor answers one DDC exchange at a time anyway.
+    private static let writeQueue = DispatchQueue(label: "com.vdisplay.ddc.write")
+    private let pendingLock = NSLock()
+    private var pending: Int?
+
     /// True when the `m1ddc` engine is installed.
     public var isAvailable: Bool { Self.m1ddcPath() != nil }
 
@@ -52,6 +57,24 @@ public final class DDCControl {
         if r.exitCode == 0 { return nil }
         let msg = r.stderr.isEmpty ? r.stdout : r.stderr
         return msg.isEmpty ? "m1ddc exited with code \(r.exitCode)" : msg
+    }
+
+    /// Queue a write off the caller's thread, keeping only the newest value. A DDC write
+    /// takes ~80ms, so a slider drag or a held key would otherwise pile up a backlog and
+    /// the monitor would crawl along behind the input - and doing it inline on the main
+    /// thread is what makes a slider feel like it is sticking.
+    public func setSoon(_ value: Int, onResult: ((Bool) -> Void)? = nil) {
+        pendingLock.lock()
+        pending = value
+        pendingLock.unlock()
+        Self.writeQueue.async {
+            self.pendingLock.lock()
+            let target = self.pending
+            self.pending = nil
+            self.pendingLock.unlock()
+            guard let target else { return }   // a newer value already took this slot
+            onResult?(self.set(target) == nil)
+        }
     }
 
     /// Nudge the value by `delta` (e.g. +10 / -10), clamped to 0-100.

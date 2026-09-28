@@ -24,9 +24,7 @@ final class MediaKeyController {
 
     private var tap: CFMachPort?
     private var tapRunLoop: CFRunLoop?
-    private let ddcQueue = DispatchQueue(label: "com.vdisplay.ddc.keys")
-    private let pendingLock = NSLock()
-    private var pending: [String: Int] = [:]   // feature -> newest wanted value
+    private let failureLock = NSLock()
     private var failures: [String: Int] = [:]  // feature -> consecutive write failures
     // Touched only on the main thread (the tap source runs on the main run loop).
     private var brightnessLevel = 100
@@ -209,38 +207,19 @@ final class MediaKeyController {
         DispatchQueue.main.async { self.hud.show(level: level, symbol: symbol) }
     }
 
-    /// DDC writes are slow (~80ms each), so they run off the tap thread, and only the
-    /// newest value per feature is sent: holding a key queues one write per repeat, and
-    /// applying the superseded ones would leave the monitor crawling behind the keyboard.
-    ///
-    /// If a write fails the monitor is gone (unplugged, asleep): give the keys back to
-    /// macOS rather than swallowing them into a dead channel. The saved setting is
-    /// untouched, so routing resumes at the next launch, on the next display change, or
-    /// when the user re-ticks the menu item.
+    /// If writes keep failing the monitor is gone (unplugged, asleep): give the keys back
+    /// to macOS rather than swallowing them into a dead channel. One failure is usually a
+    /// flaky DDC exchange, so it takes three in a row. The saved setting is untouched, so
+    /// routing resumes at the next launch, on the next display change, or when the user
+    /// re-ticks the menu item.
     private func write(_ control: DDCControl, _ value: Int, onFailure: @escaping () -> Void) {
-        pendingLock.lock()
-        pending[control.feature] = value
-        pendingLock.unlock()
-
-        ddcQueue.async {
-            self.pendingLock.lock()
-            let target = self.pending.removeValue(forKey: control.feature)
-            self.pendingLock.unlock()
-            guard let target else { return }          // a newer write already took this slot
-            guard control.set(target) != nil else {
-                self.pendingLock.lock()
-                self.failures[control.feature] = 0
-                self.pendingLock.unlock()
-                return
-            }
-            // One failed write is usually a flaky DDC exchange, not a missing monitor.
-            // Only hand the keys back after it keeps failing.
-            self.pendingLock.lock()
-            let count = (self.failures[control.feature] ?? 0) + 1
+        control.setSoon(value) { [weak self] ok in
+            guard let self else { return }
+            self.failureLock.lock()
+            let count = ok ? 0 : (self.failures[control.feature] ?? 0) + 1
             self.failures[control.feature] = count
-            self.pendingLock.unlock()
+            self.failureLock.unlock()
             guard count >= 3 else { return }
-
             DispatchQueue.main.async {
                 onFailure()
                 self.stop()

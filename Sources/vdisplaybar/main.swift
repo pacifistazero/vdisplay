@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
     private let mediaKeys = MediaKeyController()
+    private var saveVirtualBrightness: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -29,7 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         reapplyLayout(after: 4)
 
         // Route brightness / volume keys to the external monitor if enabled and permitted.
-        resumeKeyRouting()
+        // At launch, ask for Accessibility if it is missing: the ad-hoc signature changes
+        // with every rebuild, so the grant is routinely dropped and the keys would
+        // otherwise just quietly stop working.
+        resumeKeyRouting(promptForAccess: true)
 
         // Routing only sticks while a monitor answers on DDC, so re-try whenever the
         // display set changes - otherwise docking after launch leaves the keys off.
@@ -59,13 +63,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Bring key routing in line with the saved preference, quietly - this also runs
     /// on every display change, so a monitor that can't answer just stays unrouted.
-    private func resumeKeyRouting() {
+    private func resumeKeyRouting(promptForAccess: Bool = false) {
         let settings = SettingsStore.shared.load()
         guard settings.brightnessKeys != mediaKeys.routesBrightness
                 || settings.volumeKeys != mediaKeys.routesVolume else { return }
         guard settings.brightnessKeys || settings.volumeKeys else { return }
-        guard MediaKeyController.hasAccessibility(prompt: false) else {
+        guard MediaKeyController.hasAccessibility(prompt: promptForAccess) else {
             log("key routing wanted but Accessibility is not granted to this binary")
+            if promptForAccess { waitForAccessibility() }
             return
         }
         if let err = mediaKeys.update(brightness: settings.brightnessKeys,
@@ -75,6 +80,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             log("key routing on - brightness: \(mediaKeys.routesBrightness), "
               + "volume: \(mediaKeys.routesVolume)")
         }
+    }
+
+    /// The permission dialog is answered outside this process, so watch for the grant and
+    /// start routing the moment it lands - otherwise the keys stay dead until the next
+    /// display change or a trip through the menu.
+    private func waitForAccessibility() {
+        var attempts = 0
+        let timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { timer in
+            attempts += 1
+            if MediaKeyController.hasAccessibility(prompt: false) {
+                timer.invalidate()
+                self.resumeKeyRouting()
+            } else if attempts >= 24 {   // stop pestering after two minutes
+                timer.invalidate()
+                self.log("gave up waiting for Accessibility; use the menu item when ready")
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     /// Goes to /tmp/vdisplaybar.log via the LaunchAgent, the only place a background
@@ -107,13 +130,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // Rebuild the menu each time it opens so state is always fresh.
+    //
+    // Layout: what you switch on at the top, what you drag in the middle, what you set
+    // once tucked into submenus at the bottom.
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let profiles = ProfileStore.shared.loadOrCreate()
         let manager = DisplayManager.shared
+        let settings = SettingsStore.shared.load()
+        let needsAccess = (settings.brightnessKeys || settings.volumeKeys)
+            && !MediaKeyController.hasAccessibility(prompt: false)
+        let width = Self.rowWidth(for: profiles.map(\.label))
 
         menu.addItem(disabledItem("Virtual Displays"))
-
         if profiles.isEmpty {
             menu.addItem(disabledItem("No profiles"))
         }
@@ -125,12 +154,127 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.state = manager.isActive(profile.name) ? .on : .off
             menu.addItem(item)
         }
+        if !manager.activeNames.isEmpty {
+            let stopAll = NSMenuItem(title: "Stop All Displays",
+                                     action: #selector(stopAll), keyEquivalent: "")
+            stopAll.target = self
+            menu.addItem(stopAll)
+        }
+
+        // The monitor's own hardware controls, over DDC. Both sliders are continuous and
+        // write asynchronously, so dragging stays smooth despite ~80ms per DDC exchange.
+        let brightness = DDCControl.brightness.isAvailable ? DDCControl.brightness.get() : nil
+        let volume = DDCControl.volume.isAvailable ? DDCControl.volume.get() : nil
+        if brightness != nil || volume != nil {
+            menu.addItem(.separator())
+            menu.addItem(disabledItem("Monitor"))
+            if let brightness {
+                menu.addItem(sliderRow(symbol: "sun.max.fill", tip: "Monitor brightness (DDC)",
+                                       value: brightness, width: width,
+                                       action: #selector(brightnessChanged(_:))))
+            }
+            if let volume {
+                menu.addItem(sliderRow(symbol: "speaker.wave.2.fill", tip: "Monitor volume (DDC)",
+                                       value: volume, width: width,
+                                       action: #selector(volumeChanged(_:))))
+            }
+        }
+
+        // Virtual displays have no backlight, so they dim with an overlay instead.
+        if !manager.activeDisplayIDs.isEmpty {
+            menu.addItem(.separator())
+            menu.addItem(disabledItem("Virtual Display"))
+            menu.addItem(sliderRow(symbol: "circle.lefthalf.filled",
+                                   tip: "Dim the virtual display (overlay)",
+                                   value: settings.virtualBrightness, width: width,
+                                   action: #selector(virtualBrightnessChanged(_:))))
+        }
 
         menu.addItem(.separator())
+        menu.addItem(layoutMenuItem())
+        menu.addItem(settingsMenuItem(profiles: profiles, settings: settings))
+
+        menu.addItem(.separator())
+        if needsAccess {
+            let fix = NSMenuItem(title: "⚠️ Grant Accessibility…",
+                                 action: #selector(grantAccessibility), keyEquivalent: "")
+            fix.target = self
+            menu.addItem(fix)
+        }
+        let quit = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
+        quit.target = self
+        menu.addItem(quit)
+    }
+
+    /// Saved monitor arrangements: restore, pick one for login, save, delete.
+    private func layoutMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Monitor Layout", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        let saved = LayoutStore.shared.list()
+
+        if saved.isEmpty {
+            submenu.addItem(disabledItem("No saved layouts"))
+        } else {
+            for name in saved {
+                let restore = NSMenuItem(title: "Restore “\(name)”",
+                                         action: #selector(restoreLayout(_:)), keyEquivalent: "")
+                restore.target = self
+                restore.representedObject = name
+                submenu.addItem(restore)
+            }
+
+            let atLogin = NSMenuItem(title: "Restore at Login", action: nil, keyEquivalent: "")
+            let atLoginMenu = NSMenu()
+            let current = SettingsStore.shared.load().startupLayout
+            let none = NSMenuItem(title: "None",
+                                  action: #selector(setStartupLayout(_:)), keyEquivalent: "")
+            none.target = self
+            none.representedObject = ""
+            none.state = (current?.isEmpty ?? true) ? .on : .off
+            atLoginMenu.addItem(none)
+            for name in saved {
+                let pick = NSMenuItem(title: name,
+                                      action: #selector(setStartupLayout(_:)), keyEquivalent: "")
+                pick.target = self
+                pick.representedObject = name
+                pick.state = (current == name) ? .on : .off
+                atLoginMenu.addItem(pick)
+            }
+            atLogin.submenu = atLoginMenu
+            submenu.addItem(atLogin)
+        }
+
+        submenu.addItem(.separator())
+        let save = NSMenuItem(title: "Save Current Layout…",
+                              action: #selector(saveLayoutPrompt), keyEquivalent: "")
+        save.target = self
+        submenu.addItem(save)
+
+        if !saved.isEmpty {
+            let delete = NSMenuItem(title: "Delete Layout", action: nil, keyEquivalent: "")
+            let deleteMenu = NSMenu()
+            for name in saved {
+                let item = NSMenuItem(title: "\(name)…",
+                                      action: #selector(deleteLayout(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = name
+                deleteMenu.addItem(item)
+            }
+            delete.submenu = deleteMenu
+            submenu.addItem(delete)
+        }
+
+        item.submenu = submenu
+        return item
+    }
+
+    /// Set-once preferences, kept out of the way of the controls above.
+    private func settingsMenuItem(profiles: [DisplayProfile], settings: Settings) -> NSMenuItem {
+        let item = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
 
         if !profiles.isEmpty {
-            let autoItem = NSMenuItem(title: "Auto-start at Login",
-                                      action: nil, keyEquivalent: "")
+            let auto = NSMenuItem(title: "Auto-start at Login", action: nil, keyEquivalent: "")
             let autoMenu = NSMenu()
             for profile in profiles {
                 let sub = NSMenuItem(title: profile.name,
@@ -140,140 +284,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 sub.state = profile.autostart ? .on : .off
                 autoMenu.addItem(sub)
             }
-            autoItem.submenu = autoMenu
-            menu.addItem(autoItem)
-
-            let stopAll = NSMenuItem(title: "Stop All Displays",
-                                     action: #selector(stopAll), keyEquivalent: "")
-            stopAll.target = self
-            menu.addItem(stopAll)
+            auto.submenu = autoMenu
+            submenu.addItem(auto)
+            submenu.addItem(.separator())
         }
 
-        menu.addItem(.separator())
+        submenu.addItem(keysItem("Use Brightness Keys (F1/F2)",
+                                 on: mediaKeys.routesBrightness,
+                                 action: #selector(toggleBrightnessKeys)))
+        submenu.addItem(keysItem("Use Volume Keys (F10-F12)",
+                                 on: mediaKeys.routesVolume,
+                                 action: #selector(toggleVolumeKeys)))
 
-        // Monitor arrangement save/restore.
-        let layoutItem = NSMenuItem(title: "Monitor Layout", action: nil, keyEquivalent: "")
-        let layoutMenu = NSMenu()
-        let saved = LayoutStore.shared.list()
-        if saved.isEmpty {
-            layoutMenu.addItem(disabledItem("No saved layouts"))
-        } else {
-            for name in saved {
-                let item = NSMenuItem(title: "Restore “\(name)”",
-                                      action: #selector(restoreLayout(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = name
-                layoutMenu.addItem(item)
-            }
-        }
-        if !saved.isEmpty {
-            let atLogin = NSMenuItem(title: "Restore at Login", action: nil, keyEquivalent: "")
-            let atLoginMenu = NSMenu()
-            let current = SettingsStore.shared.load().startupLayout
-            let none = NSMenuItem(title: "None",
-                                  action: #selector(setStartupLayout(_:)), keyEquivalent: "")
-            none.target = self
-            none.representedObject = ""
-            none.state = (current == nil || current!.isEmpty) ? .on : .off
-            atLoginMenu.addItem(none)
-            for name in saved {
-                let item = NSMenuItem(title: name,
-                                      action: #selector(setStartupLayout(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = name
-                item.state = (current == name) ? .on : .off
-                atLoginMenu.addItem(item)
-            }
-            atLogin.submenu = atLoginMenu
-            layoutMenu.addItem(atLogin)
-        }
-
-        layoutMenu.addItem(.separator())
-        let saveLayout = NSMenuItem(title: "Save Current Layout…",
-                                    action: #selector(saveLayoutPrompt), keyEquivalent: "")
-        saveLayout.target = self
-        layoutMenu.addItem(saveLayout)
-
-        if !saved.isEmpty {
-            let deleteItem = NSMenuItem(title: "Delete Layout", action: nil, keyEquivalent: "")
-            let deleteMenu = NSMenu()
-            for name in saved {
-                let item = NSMenuItem(title: "\(name)…",
-                                      action: #selector(deleteLayout(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = name
-                deleteMenu.addItem(item)
-            }
-            deleteItem.submenu = deleteMenu
-            layoutMenu.addItem(deleteItem)
-        }
-        layoutItem.submenu = layoutMenu
-        menu.addItem(layoutItem)
-
-        // Physical-monitor brightness over DDC (only when m1ddc is installed). The
-        // slider needs a monitor that answers; the keys toggle is always shown so
-        // there is something to click once one is connected.
-        // ponytail: each section costs one synchronous m1ddc read per menu open;
-        // cache + refresh in the background if the menu ever feels sluggish.
-        if DDCControl.brightness.isAvailable {
-            menu.addItem(.separator())
-            menu.addItem(disabledItem("Monitor Brightness"))
-            if let brightness = sliderItem(for: .brightness, action: #selector(brightnessChanged(_:))) {
-                menu.addItem(brightness)
-            }
-
-            menu.addItem(keysItem("Use Brightness Keys (F1/F2)",
-                                  on: mediaKeys.routesBrightness,
-                                  action: #selector(toggleBrightnessKeys)))
-        }
-
-        // Virtual displays have no backlight, so they dim with an overlay instead of DDC.
-        if !DisplayManager.shared.activeDisplayIDs.isEmpty {
-            menu.addItem(.separator())
-            menu.addItem(disabledItem("Virtual Display Brightness"))
-            let level = SettingsStore.shared.load().virtualBrightness
-            menu.addItem(sliderItem(value: level,
-                                    action: #selector(virtualBrightnessChanged(_:)),
-                                    continuous: true))
-        }
-
-        // Monitor speaker volume over DDC - macOS can't drive it when the panel's
-        // own speakers are the output (HDMI/DP digital out has no software volume).
-        if DDCControl.volume.isAvailable {
-            menu.addItem(.separator())
-            menu.addItem(disabledItem("Monitor Volume"))
-            if let volume = sliderItem(for: .volume, action: #selector(volumeChanged(_:))) {
-                menu.addItem(volume)
-            }
-            menu.addItem(keysItem("Use Volume Keys (F10-F12)",
-                                  on: mediaKeys.routesVolume,
-                                  action: #selector(toggleVolumeKeys)))
-        }
-
-        // The keys silently do nothing without Accessibility, and the grant is dropped
-        // every time the binary is rebuilt - so say so where it can be acted on.
-        let settings = SettingsStore.shared.load()
-        if settings.brightnessKeys || settings.volumeKeys,
-           !MediaKeyController.hasAccessibility(prompt: false) {
-            menu.addItem(.separator())
-            let fix = NSMenuItem(title: "⚠️ Keys need Accessibility — Grant…",
-                                 action: #selector(grantAccessibility), keyEquivalent: "")
-            fix.target = self
-            menu.addItem(fix)
-        }
-
-        menu.addItem(.separator())
-
+        submenu.addItem(.separator())
         let edit = NSMenuItem(title: "Edit Profiles…",
                               action: #selector(editProfiles), keyEquivalent: "")
         edit.target = self
-        menu.addItem(edit)
+        submenu.addItem(edit)
 
-        menu.addItem(.separator())
+        item.submenu = submenu
+        return item
+    }
 
-        let quit = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
+    /// Width for the slider rows: a custom view does not stretch to the menu, so match the
+    /// widest ordinary item instead of leaving a ragged gap down the right-hand side.
+    private static func rowWidth(for extraTitles: [String]) -> CGFloat {
+        let titles = extraTitles + ["Virtual Displays", "Stop All Displays", "Monitor Layout",
+                                    "⚠️ Grant Accessibility…", "Settings", "Quit"]
+        let font = NSFont.menuFont(ofSize: 0)
+        let widest = titles
+            .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+            .max() ?? 0
+        // Leave room for the state column on the left and the submenu arrow on the right.
+        return min(360, max(230, ceil(widest) + 56))
     }
 
     private func disabledItem(_ title: String) -> NSMenuItem {
@@ -282,23 +325,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
-    /// A menu item hosting a slider for a DDC feature, or nil if the engine
-    /// (m1ddc) isn't installed or the monitor doesn't report that feature
-    /// (e.g. volume on a panel with no speakers).
-    private func sliderItem(for control: DDCControl, action: Selector) -> NSMenuItem? {
-        guard control.isAvailable, let current = control.get() else { return nil }
-        // DDC writes are slow; fire on release rather than on every drag tick.
-        return sliderItem(value: current, action: action, continuous: false)
-    }
-
-    private func sliderItem(value: Int, action: Selector, continuous: Bool) -> NSMenuItem {
-        let width: CGFloat = 220, height: CGFloat = 28
+    /// A full-width slider row: icon on the left, slider filling the rest of the width.
+    private func sliderRow(symbol: String, tip: String, value: Int,
+                           width: CGFloat, action: Selector) -> NSMenuItem {
+        let height: CGFloat = 24
         let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        container.toolTip = tip
+
+        let icon = NSImageView(frame: NSRect(x: 14, y: 3, width: 17, height: 17))
+        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
+        icon.contentTintColor = .secondaryLabelColor
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        container.addSubview(icon)
 
         let slider = NSSlider(value: Double(value), minValue: 0, maxValue: 100,
                               target: self, action: action)
-        slider.frame = NSRect(x: 20, y: 4, width: width - 40, height: 20)
-        slider.isContinuous = continuous
+        slider.frame = NSRect(x: 37, y: 1, width: width - 37 - 14, height: 20)
+        slider.controlSize = .small
+        // Continuous: the DDC writes behind these are queued and coalesced, so tracking
+        // the knob live no longer means a blocking round trip per tick.
+        slider.isContinuous = true
         container.addSubview(slider)
 
         let item = NSMenuItem()
@@ -307,26 +353,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func virtualBrightnessChanged(_ sender: NSSlider) {
+        let level = sender.integerValue
         for id in DisplayManager.shared.activeDisplayIDs {
-            DisplayShade.shared.set(level: sender.integerValue, for: id)
+            DisplayShade.shared.set(level: level, for: id)
         }
-        var settings = SettingsStore.shared.load()
-        settings.virtualBrightness = sender.integerValue
-        SettingsStore.shared.save(settings)
+        // The overlay follows the knob immediately; the file write waits for the drag to
+        // settle instead of rewriting JSON on every tick.
+        saveVirtualBrightness?.cancel()
+        let work = DispatchWorkItem {
+            var settings = SettingsStore.shared.load()
+            settings.virtualBrightness = level
+            SettingsStore.shared.save(settings)
+        }
+        saveVirtualBrightness = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
     @objc private func brightnessChanged(_ sender: NSSlider) {
-        apply(.brightness, sender.integerValue)
+        DDCControl.brightness.setSoon(sender.integerValue)
     }
 
     @objc private func volumeChanged(_ sender: NSSlider) {
-        apply(.volume, sender.integerValue)
-    }
-
-    private func apply(_ control: DDCControl, _ value: Int) {
-        if let err = control.set(value) {
-            showError("Couldn’t set \(control.label)", err)
-        }
+        DDCControl.volume.setSoon(sender.integerValue)
     }
 
     private func keysItem(_ title: String, on: Bool, action: Selector) -> NSMenuItem {

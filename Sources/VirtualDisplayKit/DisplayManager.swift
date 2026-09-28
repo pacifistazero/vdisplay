@@ -74,6 +74,11 @@ public final class DisplayManager {
         Array(active.keys)
     }
 
+    /// CGDirectDisplayIDs of the live virtual displays.
+    public var activeDisplayIDs: [UInt32] {
+        active.values.map { $0.displayID }
+    }
+
     /// A serial number derived from the profile name, so the same profile always
     /// presents the same EDID identity. macOS derives a display's persistent UUID
     /// from that identity, and saved monitor layouts key off the UUID - a counter

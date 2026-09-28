@@ -32,6 +32,8 @@ final class MediaKeyController {
     private var volumeLevel = 50
     private var mutedFrom: Int?   // volume before muting, nil when not muted
     private let hud = LevelHUD()
+    // Refreshed on the main thread when displays change, read on the tap thread.
+    private var layout = BrightnessTarget.Layout()
 
     private(set) var routesBrightness = false
     private(set) var routesVolume = false
@@ -52,12 +54,14 @@ final class MediaKeyController {
     /// would swallow the keys and leave the user with no working volume/brightness.
     @discardableResult
     func update(brightness: Bool, volume: Bool) -> String? {
-        // Re-read so the first key press steps from the monitor's real value.
+        // Re-read so the first key press steps from the monitor's real value. Brightness
+        // is still worth routing without DDC when a virtual display is up: those are dimmed
+        // with an overlay, and the keys pass through untouched on displays macOS handles.
         if brightness, let level = DDCControl.brightness.get() {
             brightnessLevel = level
             routesBrightness = true
         } else {
-            routesBrightness = false
+            routesBrightness = brightness && !DisplayManager.shared.activeDisplayIDs.isEmpty
         }
         if volume, let level = DDCControl.volume.get() {
             volumeLevel = level
@@ -158,20 +162,44 @@ final class MediaKeyController {
         }
     }
 
+    /// Refresh the cached display layout. Main thread, on every display change.
+    func refreshLayout() {
+        layout = BrightnessTarget.Layout()
+    }
+
     /// Returns true when the event was ours and should be swallowed.
     private func handleBrightness(type: CGEventType, event: CGEvent) -> Bool {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         guard keyCode == Self.brightnessUpKey || keyCode == Self.brightnessDownKey else {
             return false
         }
+        // Act on the display the pointer is on, and hand the key back to macOS for the
+        // ones it already handles - otherwise swallowing it kills their brightness keys.
+        let target = layout.target(at: event.location)
+        if case .system = target { return false }
+
         // Act on key-down (including auto-repeat while held); swallow key-up too so
         // the system never sees a dangling brightness event on the built-in panel.
-        if type.rawValue == Self.keyDownRawType {
-            let delta = keyCode == Self.brightnessUpKey ? Self.step : -Self.step
+        guard type.rawValue == Self.keyDownRawType else { return true }
+        let delta = keyCode == Self.brightnessUpKey ? Self.step : -Self.step
+
+        switch target {
+        case .virtual(let displayID):
+            // The overlay is AppKit, so it has to be touched on the main thread.
+            DispatchQueue.main.async {
+                let level = DisplayShade.shared.change(displayID, by: delta)
+                self.hud.show(level: level, symbol: "sun.max.fill")
+                var settings = SettingsStore.shared.load()
+                settings.virtualBrightness = level
+                SettingsStore.shared.save(settings)
+            }
+        case .ddc:
             brightnessLevel = max(0, min(100, brightnessLevel + delta))
             let goal = brightnessLevel
             showHUD(goal, "sun.max.fill")
             write(.brightness, goal) { [weak self] in self?.routesBrightness = false }
+        case .system:
+            break   // returned above
         }
         return true
     }

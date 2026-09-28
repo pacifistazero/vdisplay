@@ -12,21 +12,30 @@ public struct Settings: Codable, Equatable {
     /// Route the keyboard volume keys to the external monitor's speakers over DDC.
     public var volumeKeys: Bool
 
+    /// Software brightness applied to virtual displays, 0-100 (100 = untouched). They
+    /// have no backlight, so this is an overlay rather than a DDC write.
+    public var virtualBrightness: Int
+
     public init(startupLayout: String? = nil,
                 brightnessKeys: Bool = false,
-                volumeKeys: Bool = false) {
+                volumeKeys: Bool = false,
+                virtualBrightness: Int = 100) {
         self.startupLayout = startupLayout
         self.brightnessKeys = brightnessKeys
         self.volumeKeys = volumeKeys
+        self.virtualBrightness = virtualBrightness
     }
 
-    private enum CodingKeys: String, CodingKey { case startupLayout, brightnessKeys, volumeKeys }
+    private enum CodingKeys: String, CodingKey {
+        case startupLayout, brightnessKeys, volumeKeys, virtualBrightness
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         startupLayout = try c.decodeIfPresent(String.self, forKey: .startupLayout)
         brightnessKeys = try c.decodeIfPresent(Bool.self, forKey: .brightnessKeys) ?? false
         volumeKeys = try c.decodeIfPresent(Bool.self, forKey: .volumeKeys) ?? false
+        virtualBrightness = try c.decodeIfPresent(Int.self, forKey: .virtualBrightness) ?? 100
     }
 }
 

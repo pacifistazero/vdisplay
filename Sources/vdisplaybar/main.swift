@@ -39,8 +39,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func screensChanged() {
+        mediaKeys.refreshLayout()
+        applyVirtualBrightness()
         // Give the monitor a moment to come up before asking it anything over DDC.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.resumeKeyRouting() }
+    }
+
+    /// Re-apply the saved software brightness to every live virtual display. They are
+    /// recreated from scratch at each launch, so the overlay has to be put back.
+    private func applyVirtualBrightness() {
+        let live = DisplayManager.shared.activeDisplayIDs
+        DisplayShade.shared.prune(keeping: Set(live))
+        let level = SettingsStore.shared.load().virtualBrightness
+        guard level < 100 else { return }
+        for id in live {
+            DisplayShade.shared.set(level: level, for: id)
+        }
     }
 
     /// Bring key routing in line with the saved preference, quietly - this also runs
@@ -213,6 +227,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   action: #selector(toggleBrightnessKeys)))
         }
 
+        // Virtual displays have no backlight, so they dim with an overlay instead of DDC.
+        if !DisplayManager.shared.activeDisplayIDs.isEmpty {
+            menu.addItem(.separator())
+            menu.addItem(disabledItem("Virtual Display Brightness"))
+            let level = SettingsStore.shared.load().virtualBrightness
+            menu.addItem(sliderItem(value: level,
+                                    action: #selector(virtualBrightnessChanged(_:)),
+                                    continuous: true))
+        }
+
         // Monitor speaker volume over DDC - macOS can't drive it when the panel's
         // own speakers are the output (HDMI/DP digital out has no software volume).
         if DDCControl.volume.isAvailable {
@@ -251,19 +275,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// (e.g. volume on a panel with no speakers).
     private func sliderItem(for control: DDCControl, action: Selector) -> NSMenuItem? {
         guard control.isAvailable, let current = control.get() else { return nil }
+        // DDC writes are slow; fire on release rather than on every drag tick.
+        return sliderItem(value: current, action: action, continuous: false)
+    }
+
+    private func sliderItem(value: Int, action: Selector, continuous: Bool) -> NSMenuItem {
         let width: CGFloat = 220, height: CGFloat = 28
         let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
 
-        let slider = NSSlider(value: Double(current), minValue: 0, maxValue: 100,
+        let slider = NSSlider(value: Double(value), minValue: 0, maxValue: 100,
                               target: self, action: action)
         slider.frame = NSRect(x: 20, y: 4, width: width - 40, height: 20)
-        // DDC writes are slow; fire on release rather than on every drag tick.
-        slider.isContinuous = false
+        slider.isContinuous = continuous
         container.addSubview(slider)
 
         let item = NSMenuItem()
         item.view = container
         return item
+    }
+
+    @objc private func virtualBrightnessChanged(_ sender: NSSlider) {
+        for id in DisplayManager.shared.activeDisplayIDs {
+            DisplayShade.shared.set(level: sender.integerValue, for: id)
+        }
+        var settings = SettingsStore.shared.load()
+        settings.virtualBrightness = sender.integerValue
+        SettingsStore.shared.save(settings)
     }
 
     @objc private func brightnessChanged(_ sender: NSSlider) {
@@ -318,14 +355,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let manager = DisplayManager.shared
         if manager.isActive(name) {
             manager.stop(name)
+            DisplayShade.shared.prune(keeping: Set(manager.activeDisplayIDs))
             reapplyLayout()
         } else if let profile = ProfileStore.shared.loadOrCreate().first(where: { $0.name == name }) {
-            if manager.start(profile) == nil {
+            guard let id = manager.start(profile) else {
                 showError("Failed to create “\(name)”.",
                           "The private display API may have changed on this macOS version.")
-            } else {
-                reapplyLayout()
+                return
             }
+            // A new display comes up at full brightness; put the saved dimming back.
+            DisplayShade.shared.set(level: SettingsStore.shared.load().virtualBrightness, for: id)
+            reapplyLayout()
         }
     }
 
@@ -339,6 +379,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func stopAll() {
         DisplayManager.shared.stopAll()
+        DisplayShade.shared.clearAll()
         reapplyLayout()
     }
 
@@ -392,6 +433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func quit() {
+        DisplayShade.shared.clearAll()
         DisplayManager.shared.stopAll()
         NSApp.terminate(nil)
     }

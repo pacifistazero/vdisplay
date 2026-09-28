@@ -22,6 +22,8 @@ natively offer. Free, no expiry, no paid tier.
   menu-bar slider, a CLI, or by routing the **F1/F2 brightness keys** to it.
 - **Monitor volume** — drive the monitor's own speakers over DDC from a menu-bar
   slider, a CLI, or by routing the **volume keys** (including mute) to them.
+- **Virtual display brightness** — virtual displays have no backlight, so they dim
+  with an overlay instead, driven by the same slider and keys.
 - **Two front-ends** — a `vdisplay` CLI and a `vdisplaybar` menu-bar app, from
   one small codebase.
 
@@ -135,7 +137,9 @@ because macOS's brightness keys don't drive most external displays.
 - Menu bar: the **Monitor Brightness** slider
 - CLI: `vdisplay brightness` (read) / `vdisplay brightness <0-100>` (set)
 - Keyboard: **Use Brightness Keys (F1/F2)** in the menu makes the physical
-  brightness keys drive the external monitor (with an on-screen indicator)
+  brightness keys drive whichever display the pointer is on (with an on-screen
+  indicator): DDC for an external panel, the overlay for a virtual display, and
+  for the built-in screen the key is passed straight back to macOS
 
 macOS's brightness keys only ever control the built-in display, so vdisplaybar
 can intercept them and send DDC instead. On Apple Silicon the brightness keys
@@ -146,6 +150,23 @@ permission** (System Settings › Privacy & Security › Accessibility) - macOS
 prompts you the first time you enable it. The installer ad-hoc code-signs
 `vdisplaybar` with a stable identity so the grant survives reinstalls; a rebuild
 may occasionally still ask you to re-grant.
+
+## Virtual display brightness
+
+A virtual display has no backlight, so there is nothing for DDC to talk to. It gets
+a black overlay window instead, with its transparency standing in for brightness -
+the trick [MonitorControl](https://github.com/MonitorControl/MonitorControl) uses
+for virtual displays, since scaling the gamma table (its usual software-dimming
+route) has no effect on them. When a physical monitor mirrors a virtual display,
+dimming the virtual display dims what the monitor shows.
+
+- Menu bar: the **Virtual Display Brightness** slider, shown while any virtual
+  display is running
+- Keyboard: the brightness keys, when the pointer is on the virtual display
+
+The darkest setting still passes 15% through, so the screen never goes fully black
+with the menu that turns it back up hidden behind it. The level is saved and
+re-applied when the display is recreated.
 
 ## Monitor volume
 

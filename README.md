@@ -123,6 +123,9 @@ Layouts are stored as readable `displayplacer` commands in
 per-display IDs, so a saved arrangement restores best with the same set of
 displays connected.
 
+Each profile is its own virtual display identity, so a layout saved with one profile
+will not match a different one - switching profiles means re-saving the layout.
+
 macOS derives those IDs from a display's EDID identity, so a virtual display gets
 its serial number from its profile name and keeps the same ID for good. Layouts
 saved before that (by a build where the serial came from a per-launch counter)
@@ -148,8 +151,15 @@ vdisplaybar taps them at the HID level, sends DDC, and swallows the event so the
 built-in panel's brightness doesn't also move. This needs **Accessibility
 permission** (System Settings › Privacy & Security › Accessibility) - macOS
 prompts you the first time you enable it. The installer ad-hoc code-signs
-`vdisplaybar` with a stable identity so the grant survives reinstalls; a rebuild
-may occasionally still ask you to re-grant.
+`vdisplaybar` with a stable identifier, but the signature itself is hash-based, so
+**a rebuild usually does drop the grant**. When that happens the keys silently do
+nothing, so the menu grows a **⚠️ Keys need Accessibility — Grant…** item: macOS
+often shows the old build still ticked in the list, and the fix is to remove that
+entry and add `~/.local/bin/vdisplaybar` again.
+
+A single DDC read is not reliable - a monitor will occasionally answer with nothing
+or with a stale value - so reads are retried, and the keys are only handed back to
+macOS after a write fails repeatedly rather than on the first glitch.
 
 ## Virtual display brightness
 

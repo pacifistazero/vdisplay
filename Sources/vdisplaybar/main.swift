@@ -250,6 +250,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   action: #selector(toggleVolumeKeys)))
         }
 
+        // The keys silently do nothing without Accessibility, and the grant is dropped
+        // every time the binary is rebuilt - so say so where it can be acted on.
+        let settings = SettingsStore.shared.load()
+        if settings.brightnessKeys || settings.volumeKeys,
+           !MediaKeyController.hasAccessibility(prompt: false) {
+            menu.addItem(.separator())
+            let fix = NSMenuItem(title: "⚠️ Keys need Accessibility — Grant…",
+                                 action: #selector(grantAccessibility), keyEquivalent: "")
+            fix.target = self
+            menu.addItem(fix)
+        }
+
         menu.addItem(.separator())
 
         let edit = NSMenuItem(title: "Edit Profiles…",
@@ -424,6 +436,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !name.isEmpty else { return }
         if let err = LayoutStore.shared.save(name) {
             showError("Couldn’t save layout", err)
+        }
+    }
+
+    @objc private func grantAccessibility() {
+        // Prompts if macOS is willing; otherwise the pane is where the stale entry lives.
+        if MediaKeyController.hasAccessibility(prompt: true) {
+            resumeKeyRouting()
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Grant Accessibility to vdisplaybar"
+        alert.informativeText = """
+        The brightness and volume keys need Accessibility permission, and macOS drops it         whenever vdisplaybar is rebuilt.
+
+        If vdisplaybar is already listed and ticked, the tick belongs to the old build:         remove the entry with the “−” button, then add         ~/.local/bin/vdisplaybar again (or toggle it off and on).
+        """
+        alert.addButton(withTitle: "Open Accessibility Settings")
+        alert.addButton(withTitle: "Later")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if let url = URL(string:
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
         }
     }
 

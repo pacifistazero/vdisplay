@@ -27,6 +27,7 @@ final class MediaKeyController {
     private let ddcQueue = DispatchQueue(label: "com.vdisplay.ddc.keys")
     private let pendingLock = NSLock()
     private var pending: [String: Int] = [:]   // feature -> newest wanted value
+    private var failures: [String: Int] = [:]  // feature -> consecutive write failures
     // Touched only on the main thread (the tap source runs on the main run loop).
     private var brightnessLevel = 100
     private var volumeLevel = 50
@@ -226,7 +227,20 @@ final class MediaKeyController {
             let target = self.pending.removeValue(forKey: control.feature)
             self.pendingLock.unlock()
             guard let target else { return }          // a newer write already took this slot
-            guard control.set(target) != nil else { return }
+            guard control.set(target) != nil else {
+                self.pendingLock.lock()
+                self.failures[control.feature] = 0
+                self.pendingLock.unlock()
+                return
+            }
+            // One failed write is usually a flaky DDC exchange, not a missing monitor.
+            // Only hand the keys back after it keeps failing.
+            self.pendingLock.lock()
+            let count = (self.failures[control.feature] ?? 0) + 1
+            self.failures[control.feature] = count
+            self.pendingLock.unlock()
+            guard count >= 3 else { return }
+
             DispatchQueue.main.async {
                 onFailure()
                 self.stop()

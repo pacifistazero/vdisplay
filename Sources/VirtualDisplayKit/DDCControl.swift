@@ -23,11 +23,22 @@ public final class DDCControl {
     public var isAvailable: Bool { Self.m1ddcPath() != nil }
 
     /// Current value (0-100), or nil if it can't be read.
+    ///
+    /// A single DDC read is not reliable - the monitor occasionally answers with nothing
+    /// or with garbage - so a failed read is retried before giving up. MonitorControl does
+    /// the same for the same reason; treating one flaky read as "no monitor" is how key
+    /// routing ends up switching itself off while the monitor is sitting right there.
     public func get() -> Int? {
         guard let m1ddc = Self.m1ddcPath() else { return nil }
-        let r = Self.run(m1ddc, ["get", feature])
-        guard r.exitCode == 0 else { return nil }
-        return Int(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+        for attempt in 0 ..< 3 {
+            if attempt > 0 { usleep(40_000) }
+            let r = Self.run(m1ddc, ["get", feature])
+            guard r.exitCode == 0,
+                  let value = Int(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+            else { continue }
+            return value
+        }
+        return nil
     }
 
     /// Set the value (clamped to 0-100). Returns nil on success, else an error message.
